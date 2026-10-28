@@ -12,6 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import config  # noqa: E402
 from streaming import (metrics, tcp_video_receiver, tcp_video_sender,  # noqa: E402
                        udp_video_receiver, udp_video_sender)
+from streaming.impairment import (CONDITIONS, TcpImpairmentProxy,  # noqa: E402
+                                  UdpImpairmentProxy, get_impairment_config)
 from streaming.video_common import CHUNK_BYTES  # noqa: E402
 
 PROTOCOLS = {
@@ -34,14 +36,21 @@ def run_trial(protocol, duration=10.0, condition="normal", trial=1, video=None,
               host=config.HOST, run_id=None, csv_path=metrics.CSV_PATH, impairment=None):
     """Run one sender/receiver trial on this machine, append a CSV row, and return it.
 
-    `impairment` is an optional dict (delay_ms, jitter_ms, loss_pct, rate_mbit, applied) that is
-    only RECORDED. It does not change the network. Phase 6 applies and verifies real conditions.
+    When `condition` is not 'normal' (or `impairment` specifies `applied=True`), an application-level
+    impairment proxy is used on loopback to inject loss, delay, jitter, or bandwidth limits.
     """
     if protocol not in PROTOCOLS:
         raise ValueError(f"protocol must be one of {sorted(PROTOCOLS)}")
     receiver, sender, port = PROTOCOLS[protocol]
     video = Path(video) if video else config.DEFAULT_VIDEO
-    imp = impairment or {}
+
+    if impairment is not None:
+        imp = impairment.copy()
+    elif condition in CONDITIONS:
+        imp = get_impairment_config(condition)
+    else:
+        imp = {}
+
     ready, stop, out = threading.Event(), threading.Event(), {}
 
     def run_receiver():
@@ -58,21 +67,53 @@ def run_trial(protocol, duration=10.0, condition="normal", trial=1, video=None,
         stop.set()
         raise RuntimeError("receiver did not start")
 
+    # Start impairment proxy if condition calls for it
+    proxy = None
+    send_port = port
+    if imp.get("applied"):
+        proxy_port = port + 10
+        send_port = proxy_port
+        if protocol == "udp":
+            proxy = UdpImpairmentProxy(
+                host, proxy_port, host, port,
+                delay_ms=imp.get("delay_ms", 0),
+                jitter_ms=imp.get("jitter_ms", 0),
+                loss_pct=imp.get("loss_pct", 0),
+                rate_mbit=imp.get("rate_mbit", 0),
+            )
+        else:
+            proxy = TcpImpairmentProxy(
+                host, proxy_port, host, port,
+                delay_ms=imp.get("delay_ms", 0),
+                jitter_ms=imp.get("jitter_ms", 0),
+                loss_pct=imp.get("loss_pct", 0),
+                rate_mbit=imp.get("rate_mbit", 0),
+            )
+        proxy.start()
+        if not proxy.ready_event.wait(5):
+            proxy.stop()
+            stop.set()
+            raise RuntimeError("impairment proxy did not start")
+
     before, source = metrics.read_tcp_retransmits() if protocol == "tcp" else (None, "")
     s = send_err = None
     t_start = time.perf_counter()
     try:
-        s = sender.stream(host, port, video, duration)
-    except Exception as e:  # noqa: BLE001
-        send_err = e
-        stop.set()
-    total_time = time.perf_counter() - t_start
+        try:
+            s = sender.stream(host, send_port, video, duration)
+        except Exception as e:  # noqa: BLE001
+            send_err = e
+            stop.set()
+        total_time = time.perf_counter() - t_start
 
-    t.join((duration if duration > 0 else 60) + 60)
-    if t.is_alive():
-        stop.set()
-        t.join(5)
-        out.setdefault("err", TimeoutError("receiver did not finish"))
+        t.join((duration if duration > 0 else 60) + 60)
+        if t.is_alive():
+            stop.set()
+            t.join(5)
+            out.setdefault("err", TimeoutError("receiver did not finish"))
+    finally:
+        if proxy is not None:
+            proxy.stop()
     after = metrics.read_tcp_retransmits()[0] if protocol == "tcp" else None
 
     r = out.get("r")
@@ -147,10 +188,19 @@ def main():
     p.add_argument("--duration", type=float, default=10.0,
                    help="seconds of video per trial (0 = whole video)")
     p.add_argument("--trials", type=int, default=3)
-    p.add_argument("--condition", default="normal", help="label stored with each row")
+    p.add_argument("--condition", default="normal",
+                   help="condition name: " + ", ".join(CONDITIONS) + ", or 'all'")
     p.add_argument("--video", default=str(config.DEFAULT_VIDEO))
     p.add_argument("--csv", default=str(metrics.CSV_PATH))
+    p.add_argument("--list-conditions", action="store_true",
+                   help="list available impairment conditions and descriptions")
     a = p.parse_args()
+
+    if a.list_conditions:
+        print("Supported Impairment Conditions:")
+        for name, info in CONDITIONS.items():
+            print(f"  {name:<12} : {info['description']}")
+        return 0
 
     if a.trials < 1 or a.duration < 0:
         print("ERROR: --trials must be at least 1 and --duration must not be negative")
@@ -159,20 +209,23 @@ def main():
         print(f"ERROR: video file not found: {a.video}")
         return 1
 
+    conditions = list(CONDITIONS.keys()) if a.condition == "all" else [a.condition]
     protocols = ["tcp", "udp"] if a.protocol == "both" else [a.protocol]
-    total = a.trials * len(protocols)
+    total = len(conditions) * a.trials * len(protocols)
     run_id = uuid.uuid4().hex[:8]
-    print(f"Run {run_id}: {total} trials of {a.duration:g} s, condition '{a.condition}'")
+    print(f"Run {run_id}: {total} trials ({len(conditions)} condition(s), {a.trials} trials/cond, duration {a.duration:g} s)")
     done = failures = 0
     try:
-        for trial in range(1, a.trials + 1):
-            for proto in protocols:   # alternate protocols so slow drift affects both equally
-                done += 1
-                row = run_trial(proto, a.duration, a.condition, trial, a.video,
-                                run_id=run_id, csv_path=a.csv)
-                failures += 0 if row["completed"] else 1
-                print(f"[{done}/{total}] {proto} trial {trial}: {describe(row)}")
-                time.sleep(1.0)
+        for cond in conditions:
+            print(f"\n--- Condition: {cond} ({CONDITIONS.get(cond, {}).get('description', '')}) ---")
+            for trial in range(1, a.trials + 1):
+                for proto in protocols:   # alternate protocols so slow drift affects both equally
+                    done += 1
+                    row = run_trial(proto, a.duration, cond, trial, a.video,
+                                    run_id=run_id, csv_path=a.csv)
+                    failures += 0 if row["completed"] else 1
+                    print(f"[{done}/{total}] {proto} trial {trial} ({cond}): {describe(row)}")
+                    time.sleep(1.0)
     except KeyboardInterrupt:
         print("Stopped by user")
     except PermissionError:
@@ -182,7 +235,7 @@ def main():
         print(f"ERROR: {e}")
         return 1
 
-    print(f"Saved {done} rows to {a.csv} ({failures} failed)")
+    print(f"\nSaved {done} rows to {a.csv} ({failures} failed)")
     return 0 if failures == 0 else 2
 
 
