@@ -486,14 +486,48 @@ with st.sidebar:
     st.markdown(f"**Chunk Size:** `{config.UDP_PAYLOAD_SIZE}` bytes")
     
     st.markdown("---")
-    st.markdown("#### 🎬 Source Video Asset")
-    source_video_path = config.DEFAULT_VIDEO
-    if source_video_path.is_file():
-        st.caption(f"Source: `{source_video_path.name}` ({source_video_path.stat().st_size / 1024:.1f} KB)")
-        with st.expander("Preview Source Video", expanded=False):
-            st.video(str(source_video_path))
+    st.markdown("#### 🎬 Video Asset Selection")
+    video_source_mode = st.radio(
+        "Source Stream Asset",
+        options=["Default Video (sample.mp4)", "Upload Custom Video"],
+        index=0,
+        help="Use the standardized benchmark sample.mp4 or upload a custom video file (.mp4, .mkv, .mov, .avi, .ts)",
+    )
+
+    active_video_path = config.DEFAULT_VIDEO
+    active_video_name = "sample.mp4"
+    active_video_sub = f"{config.VIDEO_WIDTH}x{config.VIDEO_HEIGHT} @ {config.VIDEO_FPS}fps"
+
+    if video_source_mode == "Upload Custom Video":
+        uploaded_video = st.file_uploader(
+            "Upload Custom Video File",
+            type=["mp4", "mkv", "mov", "avi", "ts"],
+            help="Supported: MP4, MKV, MOV, AVI, TS. FFmpeg automatically scales to 640x360@25fps H.264 real-time stream.",
+        )
+        if uploaded_video is not None:
+            custom_path = config.VIDEO_DIR / f"upload_{uploaded_video.name}"
+            with open(custom_path, "wb") as f:
+                f.write(uploaded_video.getbuffer())
+            active_video_path = custom_path
+            active_video_name = uploaded_video.name
+            size_kb = active_video_path.stat().st_size / 1024
+            active_video_sub = f"Custom: {size_kb:.1f} KB"
+            st.success(f"Loaded: `{uploaded_video.name}` ({size_kb:.1f} KB)")
+            with st.expander("Preview Uploaded Video", expanded=True):
+                st.video(str(active_video_path))
+        else:
+            st.info("No custom file selected yet. Using default `sample.mp4`.")
+            if config.DEFAULT_VIDEO.is_file():
+                with st.expander("Preview Default Video", expanded=False):
+                    st.video(str(config.DEFAULT_VIDEO))
     else:
-        st.warning("Default video asset not found.")
+        if config.DEFAULT_VIDEO.is_file():
+            size_kb = config.DEFAULT_VIDEO.stat().st_size / 1024
+            st.caption(f"Default: `{config.DEFAULT_VIDEO.name}` ({size_kb:.1f} KB)")
+            with st.expander("Preview Default Video", expanded=False):
+                st.video(str(config.DEFAULT_VIDEO))
+        else:
+            st.warning("Default sample.mp4 video file not found.")
 
     st.markdown("---")
     st.markdown("#### ⚙️ Quick Controls")
@@ -607,7 +641,7 @@ COLOR_ACCENT = "#A78BFA"
 PROTOCOL_COLOR_MAP = {"tcp": COLOR_TCP, "udp": COLOR_UDP, "TCP": COLOR_TCP, "UDP": COLOR_UDP}
 
 # Helper to execute a trial safely with defensive signature inspection
-def execute_trial_safe(protocol, duration, condition, trial, run_id, launch_player):
+def execute_trial_safe(protocol, duration, condition, trial, run_id, launch_player, video_path=None):
     sig = inspect.signature(run_experiment.run_trial)
     params = sig.parameters
     kwargs = {
@@ -620,6 +654,8 @@ def execute_trial_safe(protocol, duration, condition, trial, run_id, launch_play
     }
     if "play" in params:
         kwargs["play"] = launch_player
+    if "video" in params and video_path:
+        kwargs["video"] = str(video_path)
     return run_experiment.run_trial(**kwargs)
 
 # ==============================================================================
@@ -628,6 +664,16 @@ def execute_trial_safe(protocol, duration, condition, trial, run_id, launch_play
 with tab_runner:
     st.markdown("### 🎛️ Streaming Pipeline & Real-Time Experiment Execution")
     
+    # Active video source chip
+    video_type_label = "Default Sample Video" if active_video_name == "sample.mp4" else "User Uploaded Video"
+    st.markdown(f"""
+    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 12px; color: #CBD5E1;">
+        <span style="font-size: 14px;">🎬</span>
+        <span>Active Source Asset: <strong style="color: #35C8F4;">{active_video_name}</strong> ({active_video_sub})</span>
+        <span style="font-size: 11px; padding: 2px 7px; border-radius: 4px; background: rgba(53, 200, 244, 0.12); color: #35C8F4; border: 1px solid rgba(53, 200, 244, 0.3);">{video_type_label}</span>
+    </div>
+    """, unsafe_allow_html=True)
+
     # Video Transfer Architectural Pipeline Visualization
     st.markdown(f"""
     <div class="pipeline-card">
@@ -635,10 +681,10 @@ with tab_runner:
             <span>🔬 Video Transfer Architecture & Packet Pipeline</span>
         </div>
         <div class="pipeline-diagram">
-            <div class="pipeline-node">
+            <div class="pipeline-node" style="border-color: rgba(53, 200, 244, 0.4);">
                 <div class="pipeline-node-icon">🎞️</div>
-                <div class="pipeline-node-title">Source MP4 Video</div>
-                <div class="pipeline-node-sub">{config.VIDEO_WIDTH}x{config.VIDEO_HEIGHT} @ {config.VIDEO_FPS}fps</div>
+                <div class="pipeline-node-title">{active_video_name}</div>
+                <div class="pipeline-node-sub">{active_video_sub}</div>
             </div>
             <div class="pipeline-arrow">➔</div>
             <div class="pipeline-node">
@@ -729,108 +775,120 @@ with tab_runner:
     st.markdown("#### 📺 Live Side-by-Side Streaming Arena")
     arena_status = st.empty()
     col_tcp_arena, col_udp_arena = st.columns(2)
+    tcp_slot = col_tcp_arena.empty()
+    udp_slot = col_udp_arena.empty()
     comparison_container = st.container()
 
-    # Function to render a stream card in the arena
-    def render_stream_card(col, proto, status_badge, row=None, error=None):
-        with col:
-            is_tcp = proto.lower() == "tcp"
-            border_cls = "stream-box-tcp" if is_tcp else "stream-box-udp"
-            accent_color = COLOR_TCP if is_tcp else COLOR_UDP
-            port_num = config.VIDEO_TCP_PORT if is_tcp else config.VIDEO_UDP_PORT
-            proto_name = "TCP (Reliable Byte-Stream)" if is_tcp else "UDP (Timely Datagram)"
-            icon = "🔌" if is_tcp else "⚡"
+    # Function to render a stream card in the arena (replaces content in-place using slot)
+    def render_stream_card(slot, proto, status_badge, row=None, error=None):
+        is_tcp = proto.lower() == "tcp"
+        border_cls = "stream-box-tcp" if is_tcp else "stream-box-udp"
+        accent_color = COLOR_TCP if is_tcp else COLOR_UDP
+        port_num = config.VIDEO_TCP_PORT if is_tcp else config.VIDEO_UDP_PORT
+        proto_name = "TCP (Reliable Byte-Stream)" if is_tcp else "UDP (Timely Datagram)"
+        icon = "🔌" if is_tcp else "⚡"
 
-            if row is not None and row.get("completed"):
-                tp = f"{row.get('throughput_mbps', 0):.2f} Mbps"
-                lat = f"{row.get('lat_avg_ms', 0):.2f} ms"
-                jit = f"{row.get('jitter_ms', 0):.2f} ms"
-                loss = f"{row.get('loss_pct', 0):.2f}%" if not is_tcp else "0.00% (ACKed)"
-                stalls = f"{row.get('stalls', 0)} ({row.get('stall_total_ms', 0):.0f} ms)" if is_tcp else "0 (No Head-of-Line)"
-                integrity = "✅ SHA-256 Match" if str(row.get("sha256_match")) == "True" else ("❌ Corrupted" if str(row.get("sha256_match")) == "False" else "Loss Tolerant")
+        # Check for completion vs error
+        is_completed = False
+        if row is not None:
+            is_completed = str(row.get("completed", "")).lower() in ("true", "1")
+            if not is_completed and not error:
+                error = row.get("error") or "Trial was interrupted or connection timed out"
 
-                diagnosis = (
-                    f"<strong>Head-of-Line Blocking:</strong> TCP guaranteed 100% byte integrity. "
-                    f"Network impairments caused {row.get('stalls', 0)} buffering stalls ({row.get('stall_total_ms', 0):.0f} ms starvation) and {lat} transit latency."
-                    if is_tcp else
-                    f"<strong>Timely Datagram Delivery:</strong> UDP prioritized immediate delivery with {jit} jitter and {lat} latency. "
-                    f"Missing datagrams ({loss} loss) were skipped without stalling the decoder."
-                )
+        if is_completed and row is not None:
+            tp = f"{row.get('throughput_mbps', 0):.2f} Mbps"
+            lat = f"{row.get('lat_avg_ms', 0):.2f} ms"
+            jit = f"{row.get('jitter_ms', 0):.2f} ms"
+            loss = f"{row.get('loss_pct', 0):.2f}%" if not is_tcp else "0.00% (ACKed)"
+            stalls = f"{row.get('stalls', 0)} ({row.get('stall_total_ms', 0):.0f} ms)" if is_tcp else "0 (No Head-of-Line)"
+            integrity = "✅ SHA-256 Match" if str(row.get("sha256_match")) == "True" else ("❌ Corrupted" if str(row.get("sha256_match")) == "False" else "Loss Tolerant")
 
-                st.markdown(f"""
-                <div class="stream-box {border_cls}">
-                    <div class="stream-header">
-                        <div class="stream-title" style="color: {accent_color};">
-                            <span>{icon} {proto_name}</span>
-                            <span style="font-size: 11px; font-family: 'JetBrains Mono'; color: #94A3B8;">Port {port_num}</span>
-                        </div>
-                        <div style="font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 4px; background: rgba(16, 185, 129, 0.15); color: #10B981; border: 1px solid rgba(16, 185, 129, 0.3);">
-                            {status_badge}
-                        </div>
+            diagnosis = (
+                f"<strong>Head-of-Line Blocking:</strong> TCP guaranteed 100% byte integrity. "
+                f"Network impairments caused {row.get('stalls', 0)} buffering stalls ({row.get('stall_total_ms', 0):.0f} ms starvation) and {lat} transit latency."
+                if is_tcp else
+                f"<strong>Timely Datagram Delivery:</strong> UDP prioritized immediate delivery with {jit} jitter and {lat} latency. "
+                f"Missing datagrams ({loss} loss) were skipped without stalling the decoder."
+            )
+
+            slot.markdown(f"""
+            <div class="stream-box {border_cls}">
+                <div class="stream-header">
+                    <div class="stream-title" style="color: {accent_color};">
+                        <span>{icon} {proto_name}</span>
+                        <span style="font-size: 11px; font-family: 'JetBrains Mono'; color: #94A3B8;">Port {port_num}</span>
                     </div>
-                    <div class="stream-grid">
-                        <div class="stream-stat">
-                            <div class="stream-stat-label">Throughput</div>
-                            <div class="stream-stat-val" style="color: {accent_color};">{tp}</div>
-                        </div>
-                        <div class="stream-stat">
-                            <div class="stream-stat-label">Avg Latency</div>
-                            <div class="stream-stat-val">{lat}</div>
-                        </div>
-                        <div class="stream-stat">
-                            <div class="stream-stat-label">RFC 3550 Jitter</div>
-                            <div class="stream-stat-val">{jit}</div>
-                        </div>
-                        <div class="stream-stat">
-                            <div class="stream-stat-label">Packet Loss</div>
-                            <div class="stream-stat-val">{loss}</div>
-                        </div>
-                        <div class="stream-stat">
-                            <div class="stream-stat-label">Buffering Stalls</div>
-                            <div class="stream-stat-val">{stalls}</div>
-                        </div>
-                        <div class="stream-stat">
-                            <div class="stream-stat-label">Data Integrity</div>
-                            <div class="stream-stat-val" style="font-size: 13px;">{integrity}</div>
-                        </div>
-                    </div>
-                    <div class="stream-diagnosis">
-                        {diagnosis}
+                    <div style="font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 4px; background: rgba(16, 185, 129, 0.15); color: #10B981; border: 1px solid rgba(16, 185, 129, 0.3);">
+                        {status_badge}
                     </div>
                 </div>
-                """, unsafe_allow_html=True)
+                <div class="stream-grid">
+                    <div class="stream-stat">
+                        <div class="stream-stat-label">Throughput</div>
+                        <div class="stream-stat-val" style="color: {accent_color};">{tp}</div>
+                    </div>
+                    <div class="stream-stat">
+                        <div class="stream-stat-label">Avg Latency</div>
+                        <div class="stream-stat-val">{lat}</div>
+                    </div>
+                    <div class="stream-stat">
+                        <div class="stream-stat-label">RFC 3550 Jitter</div>
+                        <div class="stream-stat-val">{jit}</div>
+                    </div>
+                    <div class="stream-stat">
+                        <div class="stream-stat-label">Packet Loss</div>
+                        <div class="stream-stat-val">{loss}</div>
+                    </div>
+                    <div class="stream-stat">
+                        <div class="stream-stat-label">Buffering Stalls</div>
+                        <div class="stream-stat-val">{stalls}</div>
+                    </div>
+                    <div class="stream-stat">
+                        <div class="stream-stat-label">Data Integrity</div>
+                        <div class="stream-stat-val" style="font-size: 13px;">{integrity}</div>
+                    </div>
+                </div>
+                <div class="stream-diagnosis">
+                    {diagnosis}
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
 
-            elif error:
-                st.markdown(f"""
-                <div class="stream-box {border_cls}">
-                    <div class="stream-header">
-                        <div class="stream-title" style="color: {accent_color};">{icon} {proto_name}</div>
-                        <div style="font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 4px; background: rgba(239, 68, 68, 0.15); color: #EF4444; border: 1px solid rgba(239, 68, 68, 0.3);">
-                            FAILED
-                        </div>
-                    </div>
-                    <div style="color: #F87171; font-size: 12px; background: rgba(239, 68, 68, 0.05); padding: 10px; border-radius: 6px;">
-                        {error}
+        elif error:
+            slot.markdown(f"""
+            <div class="stream-box {border_cls}">
+                <div class="stream-header">
+                    <div class="stream-title" style="color: {accent_color};">{icon} {proto_name}</div>
+                    <div style="font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 4px; background: rgba(239, 68, 68, 0.15); color: #EF4444; border: 1px solid rgba(239, 68, 68, 0.3);">
+                        ERROR
                     </div>
                 </div>
-                """, unsafe_allow_html=True)
-            else:
-                st.markdown(f"""
-                <div class="stream-box {border_cls}">
-                    <div class="stream-header">
-                        <div class="stream-title" style="color: {accent_color};">
-                            <span>{icon} {proto_name}</span>
-                            <span style="font-size: 11px; font-family: 'JetBrains Mono'; color: #94A3B8;">Port {port_num}</span>
-                        </div>
-                        <div style="font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 4px; background: rgba(255, 255, 255, 0.05); color: #94A3B8; border: 1px solid rgba(255, 255, 255, 0.1);">
-                            {status_badge}
-                        </div>
+                <div style="color: #F87171; font-size: 12px; background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.2); border-radius: 6px; padding: 12px; margin-bottom: 8px;">
+                    <strong>Diagnostic Error:</strong> {error}
+                </div>
+                <div style="font-size: 11px; color: #94A3B8;">
+                    Port {port_num} released cleanly. Sockets have been drained for next trial.
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            in_prog_text = "Streaming video frames in real-time..." if "STREAM" in status_badge else ("Waiting for preceding TCP stream to complete..." if "WAIT" in status_badge else "Ready for execution. Click 'Execute Streaming Trials' above.")
+            slot.markdown(f"""
+            <div class="stream-box {border_cls}">
+                <div class="stream-header">
+                    <div class="stream-title" style="color: {accent_color};">
+                        <span>{icon} {proto_name}</span>
+                        <span style="font-size: 11px; font-family: 'JetBrains Mono'; color: #94A3B8;">Port {port_num}</span>
                     </div>
-                    <div style="color: #64748B; font-size: 12px; font-style: italic; padding: 20px 0; text-align: center;">
-                        Ready for execution. Click 'Execute Streaming Trials' above.
+                    <div style="font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 4px; background: rgba(255, 255, 255, 0.05); color: #94A3B8; border: 1px solid rgba(255, 255, 255, 0.1);">
+                        {status_badge}
                     </div>
                 </div>
-                """, unsafe_allow_html=True)
+                <div style="color: #64748B; font-size: 12px; font-style: italic; padding: 20px 0; text-align: center;">
+                    {in_prog_text}
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
 
     # Initialize session state for persistent side-by-side view
     if "last_side_by_side" not in st.session_state:
@@ -860,27 +918,30 @@ with tab_runner:
             for t in range(1, run_trials + 1):
                 # TCP Trial
                 if "tcp" in protocols_to_run:
-                    render_stream_card(col_tcp_arena, "tcp", "⏳ STREAMING...")
+                    render_stream_card(tcp_slot, "tcp", "⏳ STREAMING...")
                     if "udp" in protocols_to_run and last_udp_row is None:
-                        render_stream_card(col_udp_arena, "udp", "WAITING FOR TCP")
+                        render_stream_card(udp_slot, "udp", "WAITING FOR TCP")
                     try:
-                        tcp_res = execute_trial_safe("tcp", run_duration, c, t, run_id, launch_ffplay)
+                        tcp_res = execute_trial_safe("tcp", run_duration, c, t, run_id, launch_ffplay, active_video_path)
                         last_tcp_row = tcp_res
-                        render_stream_card(col_tcp_arena, "tcp", "COMPLETED", row=tcp_res)
+                        status_str = "COMPLETED" if str(tcp_res.get("completed")).lower() in ("true", "1") else "FAILED"
+                        render_stream_card(tcp_slot, "tcp", status_str, row=tcp_res)
                     except Exception as e:
-                        render_stream_card(col_tcp_arena, "tcp", "ERROR", error=str(e))
-                    time.sleep(0.3)
+                        render_stream_card(tcp_slot, "tcp", "ERROR", error=str(e))
+                    # Allow Windows TCP socket stack TIME_WAIT to drain cleanly
+                    time.sleep(1.0)
 
                 # UDP Trial
                 if "udp" in protocols_to_run:
-                    render_stream_card(col_udp_arena, "udp", "⏳ STREAMING...")
+                    render_stream_card(udp_slot, "udp", "⏳ STREAMING...")
                     try:
-                        udp_res = execute_trial_safe("udp", run_duration, c, t, run_id, launch_ffplay)
+                        udp_res = execute_trial_safe("udp", run_duration, c, t, run_id, launch_ffplay, active_video_path)
                         last_udp_row = udp_res
-                        render_stream_card(col_udp_arena, "udp", "COMPLETED", row=udp_res)
+                        status_str = "COMPLETED" if str(udp_res.get("completed")).lower() in ("true", "1") else "FAILED"
+                        render_stream_card(udp_slot, "udp", status_str, row=udp_res)
                     except Exception as e:
-                        render_stream_card(col_udp_arena, "udp", "ERROR", error=str(e))
-                    time.sleep(0.3)
+                        render_stream_card(udp_slot, "udp", "ERROR", error=str(e))
+                    time.sleep(1.0)
 
                 # Store latest side-by-side comparison in session state
                 if last_tcp_row is not None or last_udp_row is not None:
@@ -888,6 +949,7 @@ with tab_runner:
                         "condition": c,
                         "trial": t,
                         "duration": run_duration,
+                        "video_name": active_video_name,
                         "tcp": last_tcp_row,
                         "udp": last_udp_row,
                         "timestamp": datetime.now().strftime("%H:%M:%S"),
@@ -908,16 +970,19 @@ with tab_runner:
         c_name = sbs.get("condition")
         tcp_r = sbs.get("tcp")
         udp_r = sbs.get("udp")
+        v_name = sbs.get("video_name", "sample.mp4")
 
         if tcp_r:
-            render_stream_card(col_tcp_arena, "tcp", "VERIFIED TRIAL", row=tcp_r)
+            status_str = "VERIFIED TRIAL" if str(tcp_r.get("completed")).lower() in ("true", "1") else "FAILED TRIAL"
+            render_stream_card(tcp_slot, "tcp", status_str, row=tcp_r)
         else:
-            render_stream_card(col_tcp_arena, "tcp", "NOT EXECUTED")
+            render_stream_card(tcp_slot, "tcp", "NOT EXECUTED")
 
         if udp_r:
-            render_stream_card(col_udp_arena, "udp", "VERIFIED TRIAL", row=udp_r)
+            status_str = "VERIFIED TRIAL" if str(udp_r.get("completed")).lower() in ("true", "1") else "FAILED TRIAL"
+            render_stream_card(udp_slot, "udp", status_str, row=udp_r)
         else:
-            render_stream_card(col_udp_arena, "udp", "NOT EXECUTED")
+            render_stream_card(udp_slot, "udp", "NOT EXECUTED")
 
         # Head-to-Head Comparative Delta Banner
         if tcp_r and udp_r:
@@ -935,7 +1000,7 @@ with tab_runner:
                 <div class="comparison-banner">
                     <div class="comparison-title">
                         <span>⚔️ Head-to-Head Comparative Analysis: TCP vs. UDP under Condition '{c_name}'</span>
-                        <span style="font-size: 11px; font-weight: normal; color: #94A3B8; margin-left: auto;">Logged at {sbs.get('timestamp')}</span>
+                        <span style="font-size: 11px; font-weight: normal; color: #94A3B8; margin-left: auto;">Asset: <strong>{v_name}</strong> | Logged at {sbs.get('timestamp')}</span>
                     </div>
                     <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 12px;">
                         <div style="background: #0E1624; padding: 10px 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.05);">
