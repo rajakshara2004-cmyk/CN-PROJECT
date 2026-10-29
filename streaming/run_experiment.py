@@ -33,11 +33,13 @@ def _v(d, key):
 
 
 def run_trial(protocol, duration=10.0, condition="normal", trial=1, video=None,
-              host=config.HOST, run_id=None, csv_path=metrics.CSV_PATH, impairment=None):
+              host=config.HOST, run_id=None, csv_path=metrics.CSV_PATH, impairment=None,
+              play=False, save_path=None):
     """Run one sender/receiver trial on this machine, append a CSV row, and return it.
 
     When `condition` is not 'normal' (or `impairment` specifies `applied=True`), an application-level
     impairment proxy is used on loopback to inject loss, delay, jitter, or bandwidth limits.
+    If `play=True`, launches an ffplay window to display the stream live in real-time.
     """
     if protocol not in PROTOCOLS:
         raise ValueError(f"protocol must be one of {sorted(PROTOCOLS)}")
@@ -55,7 +57,7 @@ def run_trial(protocol, duration=10.0, condition="normal", trial=1, video=None,
 
     def run_receiver():
         try:
-            out["r"] = receiver.serve_once(host, port, play=False, save_path=None,
+            out["r"] = receiver.serve_once(host, port, play=play, save_path=save_path,
                                            wait_timeout=30, ready_event=ready, stop_event=stop)
         except Exception as e:  # noqa: BLE001
             out["err"] = e
@@ -192,6 +194,10 @@ def main():
                    help="condition name: " + ", ".join(CONDITIONS) + ", or 'all'")
     p.add_argument("--video", default=str(config.DEFAULT_VIDEO))
     p.add_argument("--csv", default=str(metrics.CSV_PATH))
+    p.add_argument("--play", action="store_true",
+                   help="display the video in real-time in an ffplay window")
+    p.add_argument("--save", default=None,
+                   help="optional path to save the received MPEG-TS video stream")
     p.add_argument("--list-conditions", action="store_true",
                    help="list available impairment conditions and descriptions")
     a = p.parse_args()
@@ -222,7 +228,7 @@ def main():
                 for proto in protocols:   # alternate protocols so slow drift affects both equally
                     done += 1
                     row = run_trial(proto, a.duration, cond, trial, a.video,
-                                    run_id=run_id, csv_path=a.csv)
+                                    run_id=run_id, csv_path=a.csv, play=a.play, save_path=a.save)
                     failures += 0 if row["completed"] else 1
                     print(f"[{done}/{total}] {proto} trial {trial} ({cond}): {describe(row)}")
                     time.sleep(1.0)
