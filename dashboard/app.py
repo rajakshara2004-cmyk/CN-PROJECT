@@ -6,6 +6,7 @@ visual pipeline inspection, side-by-side comparative monitoring, and statistical
 import importlib
 import inspect
 import io
+import platform
 import sys
 import time
 import uuid
@@ -35,47 +36,121 @@ from streaming.impairment import CONDITIONS, get_impairment_config  # noqa: E402
 # Page config
 st.set_page_config(
     page_title="NetFlow // TCP vs UDP Video Streaming Benchmark",
-    page_icon="📡",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# Research Platform Dark Navy Palette & Restrained Aesthetics
+# ------------------------------------------------------------------------------
+# Restrained Dark Theme & Unified Typographic Hierarchy CSS
+# ------------------------------------------------------------------------------
 CUSTOM_CSS = """
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
-    /* Global Typography & Palette */
+    :root {
+        --nf-bg-page: #0B1020;
+        --nf-bg-card: #121A2D;
+        --nf-bg-card-subtle: #0E1526;
+        --nf-border: rgba(255, 255, 255, 0.08);
+        --nf-border-subtle: rgba(255, 255, 255, 0.04);
+        --nf-accent: #4C8DFF;
+        --nf-accent-hover: #3B7CE6;
+        --nf-success: #3FB950;
+        --nf-error: #F85149;
+        --nf-text-primary: #F1F5F9;
+        --nf-text-secondary: #CBD5E1;
+        --nf-text-muted: #8B93A7;
+        --nf-tcp: #38BDF8;
+        --nf-udp: #FB923C;
+    }
+
+    /* Core layout constraints */
     html, body, [class*="css"] {
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
 
     .stApp {
-        background-color: #0B1020;
-        color: #F1F5F9;
+        background-color: var(--nf-bg-page);
+        color: var(--nf-text-primary);
     }
 
-    /* Streamlit core container overrides */
+    .block-container {
+        max-width: 1400px !important;
+        padding-top: 2rem !important;
+        padding-bottom: 2rem !important;
+    }
+
     header[data-testid="stHeader"] {
         background: rgba(11, 16, 32, 0.85);
         backdrop-filter: blur(8px);
-        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-    }
-    
-    section[data-testid="stSidebar"] {
-        background-color: #0E1528 !important;
-        border-right: 1px solid rgba(255, 255, 255, 0.06);
+        border-bottom: 1px solid var(--nf-border);
     }
 
-    /* Research Platform Header */
-    .platform-header {
-        background: linear-gradient(180deg, #121B2B 0%, #0F1726 100%);
-        border: 1px solid rgba(255, 255, 255, 0.07);
-        border-radius: 8px;
-        padding: 20px 24px;
-        margin-bottom: 18px;
+    section[data-testid="stSidebar"] {
+        background-color: #0E1528 !important;
+        border-right: 1px solid var(--nf-border);
     }
-    .platform-title-row {
+
+    /* Typographic hierarchy scale */
+    .nf-title {
+        font-size: 28px !important;
+        font-weight: 700 !important;
+        letter-spacing: -0.02em;
+        color: var(--nf-text-primary);
+        line-height: 1.25;
+        margin: 0;
+    }
+
+    .nf-section-heading {
+        font-size: 18px !important;
+        font-weight: 600 !important;
+        color: var(--nf-text-primary);
+        line-height: 1.3;
+        margin-top: 0;
+        margin-bottom: 12px;
+    }
+
+    .nf-subheading {
+        font-size: 14px !important;
+        font-weight: 600 !important;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--nf-text-secondary);
+        margin: 0;
+    }
+
+    .nf-label {
+        font-size: 12px !important;
+        font-weight: 500 !important;
+        color: var(--nf-text-muted) !important;
+    }
+
+    .nf-value {
+        font-size: 14px !important;
+        font-weight: 400 !important;
+        color: var(--nf-text-primary);
+    }
+
+    .nf-mono {
+        font-family: 'JetBrains Mono', monospace !important;
+    }
+
+    .nf-caption {
+        font-size: 12px;
+        color: var(--nf-text-muted);
+        line-height: 1.4;
+    }
+
+    /* Header card */
+    .nf-header-card {
+        background: var(--nf-bg-card);
+        border: 1px solid var(--nf-border);
+        border-radius: 10px;
+        padding: 20px 24px;
+        margin-bottom: 8px;
+    }
+
+    .nf-header-row {
         display: flex;
         align-items: center;
         justify-content: space-between;
@@ -83,325 +158,314 @@ CUSTOM_CSS = """
         gap: 12px;
         margin-bottom: 8px;
     }
-    .platform-title {
-        font-size: 20px;
-        font-weight: 700;
-        letter-spacing: -0.01em;
-        color: #F8FAFC;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-    }
-    .platform-title-badge {
+
+    .nf-badge {
         font-size: 11px;
         font-weight: 600;
+        letter-spacing: 0.06em;
         text-transform: uppercase;
-        letter-spacing: 0.08em;
-        padding: 3px 8px;
+        padding: 4px 10px;
         border-radius: 4px;
-        background: rgba(167, 139, 250, 0.15);
-        color: #A78BFA;
-        border: 1px solid rgba(167, 139, 250, 0.3);
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--nf-text-secondary);
+        border: 1px solid var(--nf-border);
     }
-    .platform-subtitle {
-        font-size: 13px;
-        color: #94A3B8;
-        line-height: 1.5;
-        max-width: 900px;
+
+    .nf-header-desc {
+        font-size: 14px;
+        color: var(--nf-text-muted);
+        line-height: 1.4;
+        margin: 0;
     }
-    .platform-meta-chips {
+
+    /* Experiment specs chips */
+    .nf-specs-grid {
         display: flex;
         flex-wrap: wrap;
         gap: 8px;
-        margin-top: 12px;
-    }
-    .meta-chip {
-        font-size: 11px;
-        font-family: 'JetBrains Mono', monospace;
-        background: rgba(255, 255, 255, 0.03);
-        border: 1px solid rgba(255, 255, 255, 0.07);
-        color: #94A3B8;
-        padding: 3px 8px;
-        border-radius: 4px;
-    }
-    .meta-chip strong {
-        color: #CBD5E1;
+        padding: 4px 0;
     }
 
-    /* Data-Driven KPI Cards */
-    .kpi-container {
-        display: grid;
-        grid-template-columns: repeat(5, 1fr);
-        gap: 12px;
-        margin-bottom: 20px;
+    .nf-spec-chip {
+        font-size: 12px;
+        background: var(--nf-bg-card-subtle);
+        border: 1px solid var(--nf-border);
+        border-radius: 6px;
+        padding: 6px 12px;
+        color: var(--nf-text-secondary);
     }
-    .kpi-card {
-        background: #121B2B;
-        border: 1px solid rgba(255, 255, 255, 0.06);
-        border-radius: 8px;
-        padding: 14px 16px;
-        transition: border-color 0.15s ease;
+
+    .nf-spec-chip strong {
+        color: var(--nf-text-muted);
+        font-weight: 500;
+        margin-right: 4px;
     }
-    .kpi-card:hover {
-        border-color: rgba(255, 255, 255, 0.15);
+
+    /* Sidebar environment key-value layout */
+    .nf-kv-table {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-top: 8px;
     }
-    .kpi-header {
+
+    .nf-kv-row {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin-bottom: 6px;
+        padding: 6px 0;
+        border-bottom: 1px solid var(--nf-border-subtle);
     }
-    .kpi-label {
-        font-size: 11px;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-        color: #94A3B8;
+
+    .nf-kv-row:last-child {
+        border-bottom: none;
     }
-    .kpi-indicator {
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
+
+    /* Design tokens: Card & KPI Grid */
+    .nf-card {
+        background: var(--nf-bg-card);
+        border: 1px solid var(--nf-border);
+        border-radius: 10px;
+        padding: 16px;
     }
-    .kpi-value {
-        font-size: 22px;
+
+    .nf-kpi-container {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 16px;
+        margin-top: 16px;
+        margin-bottom: 24px;
+    }
+
+    .nf-kpi-card {
+        background: var(--nf-bg-card);
+        border: 1px solid var(--nf-border);
+        border-radius: 10px;
+        padding: 16px;
+    }
+
+    .nf-kpi-value {
+        font-size: 24px;
         font-weight: 700;
-        color: #F8FAFC;
         font-family: 'JetBrains Mono', monospace;
         letter-spacing: -0.02em;
+        color: var(--nf-text-primary);
+        line-height: 1.1;
+        margin: 6px 0 4px 0;
     }
-    .kpi-subtext {
-        font-size: 11px;
-        color: #64748B;
-        margin-top: 4px;
+
+    .nf-kpi-subtext {
+        font-size: 12px;
+        color: var(--nf-text-muted);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
     }
 
-    /* Pipeline Architecture Box */
-    .pipeline-card {
-        background: #121B2B;
-        border: 1px solid rgba(255, 255, 255, 0.06);
-        border-radius: 8px;
-        padding: 16px 20px;
-        margin-bottom: 20px;
-    }
-    .pipeline-title {
-        font-size: 13px;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        color: #CBD5E1;
-        margin-bottom: 12px;
-        display: flex;
-        align-items: center;
+    /* Tab navigation bar */
+    .stTabs [data-baseweb="tab-list"] {
         gap: 8px;
+        background-color: transparent;
+        border-bottom: 1px solid var(--nf-border);
+        padding-bottom: 2px;
+        margin-bottom: 24px;
     }
-    .pipeline-diagram {
+
+    .stTabs [data-baseweb="tab"] {
+        background-color: transparent;
+        border-radius: 6px 6px 0px 0px;
+        padding: 8px 16px;
+        color: var(--nf-text-muted);
+        font-size: 14px;
+        font-weight: 500;
+        border: none;
+        transition: all 0.15s ease;
+    }
+
+    .stTabs [data-baseweb="tab"]:hover {
+        color: var(--nf-text-primary);
+        background-color: rgba(255, 255, 255, 0.03);
+    }
+
+    .stTabs [aria-selected="true"] {
+        background-color: var(--nf-bg-card) !important;
+        color: var(--nf-accent) !important;
+        font-weight: 600;
+        border-bottom: 2px solid var(--nf-accent) !important;
+    }
+
+    /* Controls & Buttons */
+    .stButton > button[kind="primary"] {
+        background: var(--nf-accent) !important;
+        color: #FFFFFF !important;
+        border: 1px solid var(--nf-accent) !important;
+        font-weight: 600 !important;
+        border-radius: 6px !important;
+        transition: background-color 0.15s ease !important;
+    }
+
+    .stButton > button[kind="primary"]:hover {
+        background: var(--nf-accent-hover) !important;
+        border-color: var(--nf-accent-hover) !important;
+    }
+
+    .stButton > button:not([kind="primary"]) {
+        background: var(--nf-bg-card) !important;
+        color: var(--nf-text-secondary) !important;
+        border: 1px solid var(--nf-border) !important;
+        border-radius: 6px !important;
+    }
+
+    .stButton > button:not([kind="primary"]):hover {
+        background: rgba(255, 255, 255, 0.05) !important;
+        border-color: rgba(255, 255, 255, 0.15) !important;
+    }
+
+    /* Single-row Pipeline Architecture */
+    .nf-pipeline-row {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        flex-wrap: wrap;
-        gap: 8px;
-        background: #0E1624;
-        border: 1px solid rgba(255, 255, 255, 0.04);
-        border-radius: 6px;
-        padding: 12px 14px;
+        gap: 6px;
+        background: var(--nf-bg-card-subtle);
+        border: 1px solid var(--nf-border);
+        border-radius: 8px;
+        padding: 12px;
+        overflow-x: auto;
     }
-    .pipeline-node {
+
+    .nf-pipeline-node {
+        flex: 1;
+        min-width: 0;
         display: flex;
         flex-direction: column;
         align-items: center;
         text-align: center;
-        padding: 8px 12px;
-        background: #141E30;
-        border: 1px solid rgba(255, 255, 255, 0.06);
+        padding: 10px 8px;
+        background: var(--nf-bg-card);
+        border: 1px solid var(--nf-border);
         border-radius: 6px;
-        min-width: 125px;
-    }
-    .pipeline-node-icon {
-        font-size: 18px;
-        margin-bottom: 4px;
-    }
-    .pipeline-node-title {
-        font-size: 12px;
-        font-weight: 600;
-        color: #F1F5F9;
-    }
-    .pipeline-node-sub {
-        font-size: 10px;
-        color: #64748B;
-        font-family: 'JetBrains Mono', monospace;
-        margin-top: 2px;
-    }
-    .pipeline-arrow {
-        color: #475569;
-        font-size: 14px;
-        font-weight: bold;
     }
 
-    /* Side-by-Side Monitoring Cards */
-    .stream-box {
-        border-radius: 8px;
-        padding: 16px 18px;
+    .nf-pipeline-node-title {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--nf-text-primary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        width: 100%;
+    }
+
+    .nf-pipeline-node-sub {
+        font-size: 11px;
+        color: var(--nf-text-muted);
+        font-family: 'JetBrains Mono', monospace;
+        margin-top: 3px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        width: 100%;
+    }
+
+    .nf-pipeline-arrow {
+        color: var(--nf-text-muted);
+        font-size: 12px;
+        opacity: 0.6;
+        user-select: none;
+        flex-shrink: 0;
+    }
+
+    /* Arena Stream Cards */
+    .nf-stream-box {
+        background: var(--nf-bg-card);
+        border: 1px solid var(--nf-border);
+        border-radius: 10px;
+        padding: 16px;
         margin-bottom: 16px;
-        background: #121B2B;
-        border: 1px solid rgba(255, 255, 255, 0.08);
     }
-    .stream-box-tcp {
-        border-left: 4px solid #35C8F4;
-    }
-    .stream-box-udp {
-        border-left: 4px solid #FF9D45;
-    }
-    .stream-header {
+
+    .nf-stream-header {
         display: flex;
         align-items: center;
         justify-content: space-between;
         margin-bottom: 12px;
     }
-    .stream-title {
-        font-size: 15px;
-        font-weight: 700;
+
+    .nf-stream-title {
+        font-size: 14px;
+        font-weight: 600;
         display: flex;
         align-items: center;
         gap: 8px;
+        color: var(--nf-text-primary);
     }
-    .stream-grid {
+
+    .nf-badge-status {
+        font-size: 11px;
+        font-weight: 600;
+        padding: 3px 8px;
+        border-radius: 4px;
+        letter-spacing: 0.04em;
+    }
+
+    .nf-badge-success {
+        background: rgba(63, 185, 80, 0.15);
+        color: var(--nf-success);
+        border: 1px solid rgba(63, 185, 80, 0.3);
+    }
+
+    .nf-badge-error {
+        background: rgba(248, 81, 73, 0.15);
+        color: var(--nf-error);
+        border: 1px solid rgba(248, 81, 73, 0.3);
+    }
+
+    .nf-badge-neutral {
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--nf-text-muted);
+        border: 1px solid var(--nf-border);
+    }
+
+    .nf-stream-grid {
         display: grid;
         grid-template-columns: repeat(3, 1fr);
         gap: 10px;
         margin-bottom: 12px;
     }
-    .stream-stat {
-        background: #0E1624;
-        border: 1px solid rgba(255, 255, 255, 0.05);
+
+    .nf-stream-stat {
+        background: var(--nf-bg-card-subtle);
+        border: 1px solid var(--nf-border-subtle);
         border-radius: 6px;
         padding: 10px 12px;
     }
-    .stream-stat-label {
-        font-size: 10px;
-        font-weight: 600;
-        text-transform: uppercase;
-        color: #94A3B8;
-        letter-spacing: 0.05em;
-        margin-bottom: 4px;
-    }
-    .stream-stat-val {
-        font-size: 16px;
-        font-weight: 700;
-        font-family: 'JetBrains Mono', monospace;
-        color: #F8FAFC;
-    }
-    .stream-diagnosis {
+
+    .nf-stream-diagnosis {
         font-size: 12px;
         line-height: 1.5;
-        color: #CBD5E1;
-        background: rgba(255, 255, 255, 0.02);
-        border: 1px solid rgba(255, 255, 255, 0.04);
+        color: var(--nf-text-secondary);
+        background: var(--nf-bg-card-subtle);
+        border: 1px solid var(--nf-border-subtle);
         border-radius: 6px;
         padding: 10px 12px;
     }
 
-    /* Comparison Head-to-Head Banner */
-    .comparison-banner {
-        background: linear-gradient(180deg, #162235 0%, #121B2B 100%);
-        border: 1px solid rgba(167, 139, 250, 0.3);
-        border-radius: 8px;
-        padding: 16px 20px;
-        margin-top: 14px;
-        margin-bottom: 18px;
-    }
-    .comparison-title {
-        font-size: 14px;
-        font-weight: 700;
-        color: #A78BFA;
-        margin-bottom: 10px;
-        display: flex;
-        align-items: center;
-        gap: 8px;
+    /* Head-to-Head Comparison Banner */
+    .nf-comparison-banner {
+        background: var(--nf-bg-card);
+        border: 1px solid var(--nf-border);
+        border-radius: 10px;
+        padding: 16px;
+        margin-top: 16px;
+        margin-bottom: 24px;
     }
 
-    /* Tabs Styling */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 6px;
-        background-color: transparent;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-        padding-bottom: 2px;
-        margin-bottom: 18px;
-    }
-    .stTabs [data-baseweb="tab"] {
-        background-color: transparent;
-        border-radius: 6px 6px 0px 0px;
-        padding: 8px 16px;
-        color: #94A3B8;
-        font-size: 13px;
-        font-weight: 500;
-        border: none;
-        transition: all 0.15s ease;
-    }
-    .stTabs [data-baseweb="tab"]:hover {
-        color: #F1F5F9;
-        background-color: rgba(255, 255, 255, 0.03);
-    }
-    .stTabs [aria-selected="true"] {
-        background-color: #121B2B !important;
-        color: #35C8F4 !important;
-        font-weight: 600;
-        border-bottom: 2px solid #35C8F4 !important;
-    }
-
-    /* Protocol Badges */
-    .proto-badge {
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 11px;
-        font-weight: 600;
-        padding: 2px 7px;
-        border-radius: 4px;
-        display: inline-block;
-    }
-    .proto-tcp {
-        background: rgba(53, 200, 244, 0.12);
-        color: #35C8F4;
-        border: 1px solid rgba(53, 200, 244, 0.3);
-    }
-    .proto-udp {
-        background: rgba(255, 157, 69, 0.12);
-        color: #FF9D45;
-        border: 1px solid rgba(255, 157, 69, 0.3);
-    }
-
-    /* Custom Button & Control Styling */
-    .stButton > button[kind="primary"] {
-        background: #1E293B !important;
-        color: #35C8F4 !important;
-        border: 1px solid rgba(53, 200, 244, 0.4) !important;
-        font-weight: 600 !important;
-        border-radius: 6px !important;
-        transition: all 0.15s ease !important;
-    }
-    .stButton > button[kind="primary"]:hover {
-        background: rgba(53, 200, 244, 0.15) !important;
-        border-color: #35C8F4 !important;
-        box-shadow: 0 0 10px rgba(53, 200, 244, 0.15);
-    }
-    .stButton > button:not([kind="primary"]) {
-        background: #121B2B !important;
-        color: #CBD5E1 !important;
-        border: 1px solid rgba(255, 255, 255, 0.08) !important;
-        border-radius: 6px !important;
-    }
-    .stButton > button:not([kind="primary"]):hover {
-        background: #182438 !important;
-        border-color: rgba(255, 255, 255, 0.15) !important;
-    }
-
-    /* Dataframe Table styling */
+    /* Dataframe table overrides */
     [data-testid="stDataFrame"] {
-        border: 1px solid rgba(255, 255, 255, 0.06);
-        border-radius: 6px;
-        background: #121B2B;
+        border: 1px solid var(--nf-border);
+        border-radius: 8px;
+        background: var(--nf-bg-card);
     }
 </style>
 """
@@ -433,60 +497,37 @@ def load_dataset() -> pd.DataFrame:
 
 
 # ------------------------------------------------------------------------------
-# Compact Header
+# 1. Header Card & Collapsed Specs
 # ------------------------------------------------------------------------------
 st.markdown("""
-<div class="platform-header">
-    <div class="platform-title-row">
-        <div class="platform-title">
-            <span>📡 NetFlow Research // TCP vs. UDP Video Streaming Evaluation</span>
-            <span class="platform-title-badge">Empirical Platform</span>
-        </div>
+<div class="nf-header-card">
+    <div class="nf-header-row">
+        <h1 class="nf-title">NetFlow Research // TCP vs. UDP Video Streaming Evaluation</h1>
+        <span class="nf-badge">Empirical Platform</span>
     </div>
-    <div class="platform-subtitle">
-        High-fidelity comparative empirical evaluation of Transmission Control Protocol (TCP) and User Datagram Protocol (UDP)
-        under real-time paced MPEG-TS streaming with token bucket rate limiting, jitter queues, and cryptographic verification.
-    </div>
-    <div class="platform-meta-chips">
-        <span class="meta-chip"><strong>Network:</strong> Loopback (127.0.0.1) & LAN Capable</span>
-        <span class="meta-chip"><strong>Codec:</strong> H.264 ultrafast (zerolatency) @ 1.0 Mbps</span>
-        <span class="meta-chip"><strong>Resolution:</strong> 640x360 @ 25fps</span>
-        <span class="meta-chip"><strong>MPEG-TS Payload:</strong> 1,316 B (7 TS pkts/datagram)</span>
-        <span class="meta-chip"><strong>Jitter Model:</strong> RFC 3550 Filter</span>
-        <span class="meta-chip"><strong>Impairment:</strong> In-Memory Proxy Pipeline</span>
-    </div>
+    <p class="nf-header-desc">
+        Comparative empirical evaluation of TCP and UDP under paced MPEG-TS streaming with deterministic network impairments.
+    </p>
 </div>
 """, unsafe_allow_html=True)
 
+with st.expander("Experiment specs", expanded=False):
+    st.markdown("""
+    <div class="nf-specs-grid">
+        <span class="nf-spec-chip"><strong>Network:</strong> Loopback (127.0.0.1)</span>
+        <span class="nf-spec-chip"><strong>Codec:</strong> H.264 ultrafast (zerolatency) @ 1.0 Mbps</span>
+        <span class="nf-spec-chip"><strong>Resolution:</strong> 640x360 @ 25fps</span>
+        <span class="nf-spec-chip"><strong>MPEG-TS Payload:</strong> 1,316 B (7 TS pkts/datagram)</span>
+        <span class="nf-spec-chip"><strong>Jitter Model:</strong> RFC 3550 Filter</span>
+        <span class="nf-spec-chip"><strong>Impairment:</strong> In-Memory Proxy Pipeline</span>
+    </div>
+    """, unsafe_allow_html=True)
+
 # ------------------------------------------------------------------------------
-# Collapsible Narrow Sidebar
+# 2. Sidebar: Controls Top, Environment in Collapsed Expander
 # ------------------------------------------------------------------------------
 with st.sidebar:
-    st.markdown("#### 🔬 Network & Environment")
-    
-    st.markdown(
-        """
-        <div style="background: #121B2B; border: 1px solid rgba(255,255,255,0.06); border-radius: 6px; padding: 12px; margin-bottom: 14px;">
-            <div style="font-size: 11px; font-weight: 600; color: #35C8F4; text-transform: uppercase; margin-bottom: 4px;">Host Topology</div>
-            <div style="font-size: 12px; color: #CBD5E1; line-height: 1.4;">
-                Testing runs on <strong>Loopback (127.0.0.1)</strong>, which exercises the full OS network stack (sliding windows, ACKs, datagrams).
-            </div>
-            <div style="font-size: 11px; color: #94A3B8; margin-top: 6px;">
-                <em>No second device required</em>: deterministic impairments are injected via in-memory proxy queues.
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown("**Host OS:** Windows 11 ARM64 (`aarch64`)")
-    st.markdown("**Python Environment:** Python 3.12 (`.venv`)")
-    st.markdown(f"**TCP Port:** `{config.VIDEO_TCP_PORT}` | **UDP Port:** `{config.VIDEO_UDP_PORT}`")
-    st.markdown(f"**Target Bitrate:** `{config.VIDEO_BITRATE}` CBR")
-    st.markdown(f"**Chunk Size:** `{config.UDP_PAYLOAD_SIZE}` bytes")
-    
-    st.markdown("---")
-    st.markdown("#### 🎬 Video Asset Selection")
+    st.markdown('<div class="nf-section-heading">Video Asset Selection</div>', unsafe_allow_html=True)
     video_source_mode = st.radio(
         "Source Stream Asset",
         options=["Default Video (sample.mp4)", "Upload Custom Video"],
@@ -513,7 +554,7 @@ with st.sidebar:
             size_kb = active_video_path.stat().st_size / 1024
             active_video_sub = f"Custom: {size_kb:.1f} KB"
             st.success(f"Loaded: `{uploaded_video.name}` ({size_kb:.1f} KB)")
-            with st.expander("Preview Uploaded Video", expanded=True):
+            with st.expander("Preview Uploaded Video", expanded=False):
                 st.video(str(active_video_path))
         else:
             st.info("No custom file selected yet. Using default `sample.mp4`.")
@@ -529,15 +570,33 @@ with st.sidebar:
         else:
             st.warning("Default sample.mp4 video file not found.")
 
-    st.markdown("---")
-    st.markdown("#### ⚙️ Quick Controls")
-    if st.button("🔄 Refresh Dataset", use_container_width=True):
+    st.markdown('<div class="nf-section-heading" style="margin-top: 16px;">Quick Controls</div>', unsafe_allow_html=True)
+    if st.button("Refresh Dataset", use_container_width=True):
         st.rerun()
+
+    host_system = f"{platform.system()} ({platform.machine()})"
+    python_ver = f"{sys.version_info.major}.{sys.version_info.minor} (.venv)"
+
+    with st.expander("Environment", expanded=False):
+        st.caption("Testing runs on loopback (127.0.0.1) exercising the full OS network stack with in-memory impairment queues.")
+        st.markdown(
+            f"""
+            <div class="nf-kv-table">
+                <div class="nf-kv-row"><span class="nf-label">Host OS</span><span class="nf-value nf-mono">{host_system}</span></div>
+                <div class="nf-kv-row"><span class="nf-label">Python</span><span class="nf-value nf-mono">{python_ver}</span></div>
+                <div class="nf-kv-row"><span class="nf-label">TCP Port</span><span class="nf-value nf-mono">{config.VIDEO_TCP_PORT}</span></div>
+                <div class="nf-kv-row"><span class="nf-label">UDP Port</span><span class="nf-value nf-mono">{config.VIDEO_UDP_PORT}</span></div>
+                <div class="nf-kv-row"><span class="nf-label">Target Bitrate</span><span class="nf-value nf-mono">{config.VIDEO_BITRATE} CBR</span></div>
+                <div class="nf-kv-row"><span class="nf-label">Chunk Size</span><span class="nf-value nf-mono">{config.UDP_PAYLOAD_SIZE} B</span></div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
     st.caption("NetFlow Research Suite • Standard Architecture")
 
 # ------------------------------------------------------------------------------
-# Load Dataset & KPI Cards
+# 4. KPI Cards: 4 cards, no colored dots, >=24px spacing
 # ------------------------------------------------------------------------------
 df = load_dataset()
 completed_df = df[df["completed"].astype(str) == "True"] if not df.empty else df
@@ -551,65 +610,45 @@ active_conditions = completed_df["condition"].nunique() if not completed_df.empt
 mean_throughput = completed_df["throughput_mbps"].mean() if not completed_df.empty else 0.0
 
 st.markdown(f"""
-<div class="kpi-container">
-    <div class="kpi-card">
-        <div class="kpi-header">
-            <span class="kpi-label">Total Trials</span>
-            <span class="kpi-indicator" style="background: #94A3B8;"></span>
-        </div>
-        <div class="kpi-value">{total_trials}</div>
-        <div class="kpi-subtext">{completed_count} verified, {failed_count} failed</div>
+<div class="nf-kpi-container">
+    <div class="nf-kpi-card">
+        <div class="nf-label">Total Trials</div>
+        <div class="nf-kpi-value">{total_trials}</div>
+        <div class="nf-kpi-subtext">{completed_count} verified, {failed_count} failed • {active_conditions}/7 conditions</div>
     </div>
-    <div class="kpi-card">
-        <div class="kpi-header">
-            <span class="kpi-label">TCP Reliable</span>
-            <span class="kpi-indicator" style="background: #35C8F4;"></span>
-        </div>
-        <div class="kpi-value" style="color: #35C8F4;">{tcp_count}</div>
-        <div class="kpi-subtext">Byte-stream / Retransmit check</div>
+    <div class="nf-kpi-card">
+        <div class="nf-label">TCP Reliable</div>
+        <div class="nf-kpi-value" style="color: var(--nf-tcp);">{tcp_count}</div>
+        <div class="nf-kpi-subtext">Byte-stream / Retransmit check</div>
     </div>
-    <div class="kpi-card">
-        <div class="kpi-header">
-            <span class="kpi-label">UDP Datagram</span>
-            <span class="kpi-indicator" style="background: #FF9D45;"></span>
-        </div>
-        <div class="kpi-value" style="color: #FF9D45;">{udp_count}</div>
-        <div class="kpi-subtext">RFC 3550 timestamps / Jitter</div>
+    <div class="nf-kpi-card">
+        <div class="nf-label">UDP Datagram</div>
+        <div class="nf-kpi-value" style="color: var(--nf-udp);">{udp_count}</div>
+        <div class="nf-kpi-subtext">RFC 3550 timestamps / Jitter</div>
     </div>
-    <div class="kpi-card">
-        <div class="kpi-header">
-            <span class="kpi-label">Conditions Tested</span>
-            <span class="kpi-indicator" style="background: #A78BFA;"></span>
-        </div>
-        <div class="kpi-value" style="color: #A78BFA;">{active_conditions} / 7</div>
-        <div class="kpi-subtext">Impairment profile coverage</div>
-    </div>
-    <div class="kpi-card">
-        <div class="kpi-header">
-            <span class="kpi-label">Mean Throughput</span>
-            <span class="kpi-indicator" style="background: #10B981;"></span>
-        </div>
-        <div class="kpi-value">{mean_throughput:.2f} <span style="font-size: 13px; color: #94A3B8;">Mbps</span></div>
-        <div class="kpi-subtext">Across active completed runs</div>
+    <div class="nf-kpi-card">
+        <div class="nf-label">Mean Throughput</div>
+        <div class="nf-kpi-value">{mean_throughput:.2f} <span style="font-size: 13px; color: var(--nf-text-muted);">Mbps</span></div>
+        <div class="nf-kpi-subtext">Across active completed runs</div>
     </div>
 </div>
 """, unsafe_allow_html=True)
 
 # ------------------------------------------------------------------------------
-# Main Tabs Navigation
+# 6. Tab Navigation: Text only, shortened labels
 # ------------------------------------------------------------------------------
 tab_runner, tab_comparison, tab_conditions, tab_summary, tab_data = st.tabs([
-    "🚀 Live Experiment Runner & Video Transfer Inspector",
-    "📊 TCP vs UDP Comparative Analysis",
-    "🧪 Impairment Scenarios & Mechanics",
-    "📈 Statistical Summaries (Mean ± Std)",
-    "📑 Audit Trail & CSV Export",
+    "Live Runner",
+    "TCP vs UDP",
+    "Impairments",
+    "Statistics",
+    "Audit & CSV",
 ])
 
 # Plotly Theme Settings
 PLOTLY_LAYOUT = dict(
     paper_bgcolor="#0B1020",
-    plot_bgcolor="#121B2B",
+    plot_bgcolor="#121A2D",
     font=dict(family="Inter, sans-serif", color="#CBD5E1", size=12),
     margin=dict(l=40, r=20, t=40, b=40),
     xaxis=dict(
@@ -630,15 +669,15 @@ PLOTLY_LAYOUT = dict(
         y=1.02,
         xanchor="right",
         x=1,
-        bgcolor="rgba(18, 27, 43, 0.8)",
+        bgcolor="rgba(18, 26, 45, 0.8)",
         bordercolor="rgba(255, 255, 255, 0.08)",
         borderwidth=1,
     ),
 )
-COLOR_TCP = "#35C8F4"
-COLOR_UDP = "#FF9D45"
-COLOR_ACCENT = "#A78BFA"
+COLOR_TCP = "#38BDF8"
+COLOR_UDP = "#FB923C"
 PROTOCOL_COLOR_MAP = {"tcp": COLOR_TCP, "udp": COLOR_UDP, "TCP": COLOR_TCP, "UDP": COLOR_UDP}
+
 
 # Helper to execute a trial safely with defensive signature inspection
 def execute_trial_safe(protocol, duration, condition, trial, run_id, launch_player, video_path=None):
@@ -658,67 +697,56 @@ def execute_trial_safe(protocol, duration, condition, trial, run_id, launch_play
         kwargs["video"] = str(video_path)
     return run_experiment.run_trial(**kwargs)
 
+
 # ==============================================================================
-# TAB 1: Live Experiment Runner & Video Transfer Inspector
+# TAB 1: Live Runner
 # ==============================================================================
 with tab_runner:
-    st.markdown("### 🎛️ Streaming Pipeline & Real-Time Experiment Execution")
-    
-    # Active video source chip
+    st.markdown('<div class="nf-section-heading">Experiment Runner</div>', unsafe_allow_html=True)
+
+    # Active video source caption
     video_type_label = "Default Sample Video" if active_video_name == "sample.mp4" else "User Uploaded Video"
     st.markdown(f"""
-    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 12px; color: #CBD5E1;">
-        <span style="font-size: 14px;">🎬</span>
-        <span>Active Source Asset: <strong style="color: #35C8F4;">{active_video_name}</strong> ({active_video_sub})</span>
-        <span style="font-size: 11px; padding: 2px 7px; border-radius: 4px; background: rgba(53, 200, 244, 0.12); color: #35C8F4; border: 1px solid rgba(53, 200, 244, 0.3);">{video_type_label}</span>
+    <div class="nf-caption" style="margin-bottom: 16px;">
+        Active Source Asset: <span class="nf-mono" style="color: var(--nf-text-primary);">{active_video_name}</span> ({active_video_sub}) • {video_type_label}
     </div>
     """, unsafe_allow_html=True)
 
-    # Video Transfer Architectural Pipeline Visualization
-    st.markdown(f"""
-    <div class="pipeline-card">
-        <div class="pipeline-title">
-            <span>🔬 Video Transfer Architecture & Packet Pipeline</span>
-        </div>
-        <div class="pipeline-diagram">
-            <div class="pipeline-node" style="border-color: rgba(53, 200, 244, 0.4);">
-                <div class="pipeline-node-icon">🎞️</div>
-                <div class="pipeline-node-title">{active_video_name}</div>
-                <div class="pipeline-node-sub">{active_video_sub}</div>
+    # 7. Video Transfer Pipeline Diagram inside Expander (Single Row, No Wrap)
+    with st.expander("Pipeline architecture", expanded=False):
+        st.markdown(f"""
+        <div class="nf-pipeline-row">
+            <div class="nf-pipeline-node">
+                <div class="nf-pipeline-node-title">{active_video_name}</div>
+                <div class="nf-pipeline-node-sub">{active_video_sub}</div>
             </div>
-            <div class="pipeline-arrow">➔</div>
-            <div class="pipeline-node">
-                <div class="pipeline-node-icon">⚙️</div>
-                <div class="pipeline-node-title">FFmpeg Transcoder</div>
-                <div class="pipeline-node-sub">libx264 zerolatency CBR</div>
+            <div class="nf-pipeline-arrow">→</div>
+            <div class="nf-pipeline-node">
+                <div class="nf-pipeline-node-title">FFmpeg Transcoder</div>
+                <div class="nf-pipeline-node-sub">libx264 zerolatency</div>
             </div>
-            <div class="pipeline-arrow">➔</div>
-            <div class="pipeline-node">
-                <div class="pipeline-node-icon">📦</div>
-                <div class="pipeline-node-title">MPEG-TS Framer</div>
-                <div class="pipeline-node-sub">7 pkts = 1,316 B chunks</div>
+            <div class="nf-pipeline-arrow">→</div>
+            <div class="nf-pipeline-node">
+                <div class="nf-pipeline-node-title">MPEG-TS Framer</div>
+                <div class="nf-pipeline-node-sub">1,316 B chunks</div>
             </div>
-            <div class="pipeline-arrow">➔</div>
-            <div class="pipeline-node" style="border-color: rgba(53, 200, 244, 0.3);">
-                <div class="pipeline-node-icon">🔌</div>
-                <div class="pipeline-node-title">Transport Sockets</div>
-                <div class="pipeline-node-sub">TCP: {config.VIDEO_TCP_PORT} | UDP: {config.VIDEO_UDP_PORT}</div>
+            <div class="nf-pipeline-arrow">→</div>
+            <div class="nf-pipeline-node">
+                <div class="nf-pipeline-node-title">Transport Sockets</div>
+                <div class="nf-pipeline-node-sub">TCP {config.VIDEO_TCP_PORT} / UDP {config.VIDEO_UDP_PORT}</div>
             </div>
-            <div class="pipeline-arrow">➔</div>
-            <div class="pipeline-node" style="border-color: rgba(167, 139, 250, 0.3);">
-                <div class="pipeline-node-icon">🌪️</div>
-                <div class="pipeline-node-title">Impairment Proxy</div>
-                <div class="pipeline-node-sub">Loss / Delay / Token Bucket</div>
+            <div class="nf-pipeline-arrow">→</div>
+            <div class="nf-pipeline-node">
+                <div class="nf-pipeline-node-title">Impairment Proxy</div>
+                <div class="nf-pipeline-node-sub">Loss / Delay / Token</div>
             </div>
-            <div class="pipeline-arrow">➔</div>
-            <div class="pipeline-node">
-                <div class="pipeline-node-icon">📥</div>
-                <div class="pipeline-node-title">Receiver Engine</div>
-                <div class="pipeline-node-sub">Metrics & SHA-256 Hash</div>
+            <div class="nf-pipeline-arrow">→</div>
+            <div class="nf-pipeline-node">
+                <div class="nf-pipeline-node-title">Receiver Engine</div>
+                <div class="nf-pipeline-node-sub">Metrics & SHA-256</div>
             </div>
         </div>
-    </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
 
     # Controls Row
     cfg_col1, cfg_col2, cfg_col3, cfg_col4 = st.columns([1.3, 1.7, 1.2, 1.0])
@@ -726,7 +754,7 @@ with tab_runner:
         run_proto = st.selectbox(
             "Transport Protocol",
             options=["both", "tcp", "udp"],
-            format_func=lambda x: "both (TCP & UDP Side-by-Side)" if x == "both" else f"{x.upper()} only",
+            format_func=lambda x: "Both (TCP & UDP Side-by-Side)" if x == "both" else f"{x.upper()} only",
             help="Select 'both' to compare TCP and UDP directly side-by-side under identical condition profiles",
         )
     with cfg_col2:
@@ -759,20 +787,20 @@ with tab_runner:
     c_opt1, c_opt2 = st.columns([1.5, 2.5])
     with c_opt1:
         launch_ffplay = st.checkbox(
-            "📺 Launch Live FFplay Video Window",
+            "Launch Live FFplay Video Window",
             value=False,
             help="Pipes incoming stream directly to an FFplay window so you can visually watch the video streaming live and observe packet drops/buffering stalls.",
         )
     with c_opt2:
         if launch_ffplay:
-            st.caption("ℹ️ *An FFplay video player window will spawn on your desktop displaying the received stream in real-time.*")
+            st.caption("An FFplay video player window will spawn on your desktop displaying the received stream in real-time.")
         else:
-            st.caption("ℹ️ *Running headless (fastest). Enable the checkbox to watch the live video player.*")
+            st.caption("Running headless (fastest). Enable the checkbox to watch the live video player.")
 
-    start_btn = st.button("▶️ Execute Streaming Trials", type="primary", use_container_width=True)
+    start_btn = st.button("Execute Streaming Trials", type="primary", use_container_width=True)
 
     # Containers for Side-by-Side Live Execution
-    st.markdown("#### 📺 Live Side-by-Side Streaming Arena")
+    st.markdown('<div class="nf-section-heading" style="margin-top: 24px;">Streaming Arena</div>', unsafe_allow_html=True)
     arena_status = st.empty()
     col_tcp_arena, col_udp_arena = st.columns(2)
     tcp_slot = col_tcp_arena.empty()
@@ -782,11 +810,15 @@ with tab_runner:
     # Function to render a stream card in the arena (replaces content in-place using slot)
     def render_stream_card(slot, proto, status_badge, row=None, error=None):
         is_tcp = proto.lower() == "tcp"
-        border_cls = "stream-box-tcp" if is_tcp else "stream-box-udp"
-        accent_color = COLOR_TCP if is_tcp else COLOR_UDP
-        port_num = config.VIDEO_TCP_PORT if is_tcp else config.VIDEO_UDP_PORT
         proto_name = "TCP (Reliable Byte-Stream)" if is_tcp else "UDP (Timely Datagram)"
-        icon = "🔌" if is_tcp else "⚡"
+        port_num = config.VIDEO_TCP_PORT if is_tcp else config.VIDEO_UDP_PORT
+
+        # Determine badge styling class
+        badge_cls = "nf-badge-neutral"
+        if "COMPLETED" in status_badge or "VERIFIED" in status_badge:
+            badge_cls = "nf-badge-success"
+        elif "ERROR" in status_badge or "FAILED" in status_badge:
+            badge_cls = "nf-badge-error"
 
         # Check for completion vs error
         is_completed = False
@@ -801,7 +833,7 @@ with tab_runner:
             jit = f"{row.get('jitter_ms', 0):.2f} ms"
             loss = f"{row.get('loss_pct', 0):.2f}%" if not is_tcp else "0.00% (ACKed)"
             stalls = f"{row.get('stalls', 0)} ({row.get('stall_total_ms', 0):.0f} ms)" if is_tcp else "0 (No Head-of-Line)"
-            integrity = "✅ SHA-256 Match" if str(row.get("sha256_match")) == "True" else ("❌ Corrupted" if str(row.get("sha256_match")) == "False" else "Loss Tolerant")
+            integrity = "Match" if str(row.get("sha256_match")) == "True" else ("Corrupted" if str(row.get("sha256_match")) == "False" else "Loss Tolerant")
 
             diagnosis = (
                 f"<strong>Head-of-Line Blocking:</strong> TCP guaranteed 100% byte integrity. "
@@ -812,43 +844,43 @@ with tab_runner:
             )
 
             slot.markdown(f"""
-            <div class="stream-box {border_cls}">
-                <div class="stream-header">
-                    <div class="stream-title" style="color: {accent_color};">
-                        <span>{icon} {proto_name}</span>
-                        <span style="font-size: 11px; font-family: 'JetBrains Mono'; color: #94A3B8;">Port {port_num}</span>
+            <div class="nf-stream-box">
+                <div class="nf-stream-header">
+                    <div class="nf-stream-title">
+                        <span>{proto_name}</span>
+                        <span class="nf-mono" style="font-size: 11px; color: var(--nf-text-muted);">Port {port_num}</span>
                     </div>
-                    <div style="font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 4px; background: rgba(16, 185, 129, 0.15); color: #10B981; border: 1px solid rgba(16, 185, 129, 0.3);">
+                    <div class="nf-badge-status {badge_cls}">
                         {status_badge}
                     </div>
                 </div>
-                <div class="stream-grid">
-                    <div class="stream-stat">
-                        <div class="stream-stat-label">Throughput</div>
-                        <div class="stream-stat-val" style="color: {accent_color};">{tp}</div>
+                <div class="nf-stream-grid">
+                    <div class="nf-stream-stat">
+                        <div class="nf-label">Throughput</div>
+                        <div class="nf-value nf-mono">{tp}</div>
                     </div>
-                    <div class="stream-stat">
-                        <div class="stream-stat-label">Avg Latency</div>
-                        <div class="stream-stat-val">{lat}</div>
+                    <div class="nf-stream-stat">
+                        <div class="nf-label">Avg Latency</div>
+                        <div class="nf-value nf-mono">{lat}</div>
                     </div>
-                    <div class="stream-stat">
-                        <div class="stream-stat-label">RFC 3550 Jitter</div>
-                        <div class="stream-stat-val">{jit}</div>
+                    <div class="nf-stream-stat">
+                        <div class="nf-label">RFC 3550 Jitter</div>
+                        <div class="nf-value nf-mono">{jit}</div>
                     </div>
-                    <div class="stream-stat">
-                        <div class="stream-stat-label">Packet Loss</div>
-                        <div class="stream-stat-val">{loss}</div>
+                    <div class="nf-stream-stat">
+                        <div class="nf-label">Packet Loss</div>
+                        <div class="nf-value nf-mono">{loss}</div>
                     </div>
-                    <div class="stream-stat">
-                        <div class="stream-stat-label">Buffering Stalls</div>
-                        <div class="stream-stat-val">{stalls}</div>
+                    <div class="nf-stream-stat">
+                        <div class="nf-label">Buffering Stalls</div>
+                        <div class="nf-value nf-mono">{stalls}</div>
                     </div>
-                    <div class="stream-stat">
-                        <div class="stream-stat-label">Data Integrity</div>
-                        <div class="stream-stat-val" style="font-size: 13px;">{integrity}</div>
+                    <div class="nf-stream-stat">
+                        <div class="nf-label">Data Integrity</div>
+                        <div class="nf-value nf-mono">{integrity}</div>
                     </div>
                 </div>
-                <div class="stream-diagnosis">
+                <div class="nf-stream-diagnosis">
                     {diagnosis}
                 </div>
             </div>
@@ -856,17 +888,20 @@ with tab_runner:
 
         elif error:
             slot.markdown(f"""
-            <div class="stream-box {border_cls}">
-                <div class="stream-header">
-                    <div class="stream-title" style="color: {accent_color};">{icon} {proto_name}</div>
-                    <div style="font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 4px; background: rgba(239, 68, 68, 0.15); color: #EF4444; border: 1px solid rgba(239, 68, 68, 0.3);">
+            <div class="nf-stream-box">
+                <div class="nf-stream-header">
+                    <div class="nf-stream-title">
+                        <span>{proto_name}</span>
+                        <span class="nf-mono" style="font-size: 11px; color: var(--nf-text-muted);">Port {port_num}</span>
+                    </div>
+                    <div class="nf-badge-status nf-badge-error">
                         ERROR
                     </div>
                 </div>
-                <div style="color: #F87171; font-size: 12px; background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.2); border-radius: 6px; padding: 12px; margin-bottom: 8px;">
+                <div style="color: var(--nf-error); font-size: 12px; background: rgba(248, 81, 73, 0.08); border: 1px solid rgba(248, 81, 73, 0.2); border-radius: 6px; padding: 12px; margin-bottom: 8px;">
                     <strong>Diagnostic Error:</strong> {error}
                 </div>
-                <div style="font-size: 11px; color: #94A3B8;">
+                <div style="font-size: 11px; color: var(--nf-text-muted);">
                     Port {port_num} released cleanly. Sockets have been drained for next trial.
                 </div>
             </div>
@@ -874,17 +909,17 @@ with tab_runner:
         else:
             in_prog_text = "Streaming video frames in real-time..." if "STREAM" in status_badge else ("Waiting for preceding TCP stream to complete..." if "WAIT" in status_badge else "Ready for execution. Click 'Execute Streaming Trials' above.")
             slot.markdown(f"""
-            <div class="stream-box {border_cls}">
-                <div class="stream-header">
-                    <div class="stream-title" style="color: {accent_color};">
-                        <span>{icon} {proto_name}</span>
-                        <span style="font-size: 11px; font-family: 'JetBrains Mono'; color: #94A3B8;">Port {port_num}</span>
+            <div class="nf-stream-box">
+                <div class="nf-stream-header">
+                    <div class="nf-stream-title">
+                        <span>{proto_name}</span>
+                        <span class="nf-mono" style="font-size: 11px; color: var(--nf-text-muted);">Port {port_num}</span>
                     </div>
-                    <div style="font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 4px; background: rgba(255, 255, 255, 0.05); color: #94A3B8; border: 1px solid rgba(255, 255, 255, 0.1);">
+                    <div class="nf-badge-status {badge_cls}">
                         {status_badge}
                     </div>
                 </div>
-                <div style="color: #64748B; font-size: 12px; font-style: italic; padding: 20px 0; text-align: center;">
+                <div style="color: var(--nf-text-muted); font-size: 12px; padding: 20px 0; text-align: center;">
                     {in_prog_text}
                 </div>
             </div>
@@ -903,8 +938,8 @@ with tab_runner:
 
         arena_status.markdown(
             f"""
-            <div style="background: #121B2B; border-left: 3px solid #35C8F4; padding: 10px 14px; border-radius: 4px; margin-bottom: 14px; font-size: 13px;">
-                🚀 <strong>Executing Live Streaming Matrix:</strong> {total_runs} trial(s) ({run_duration}s per trial). 
+            <div class="nf-card" style="padding: 10px 14px; margin-bottom: 14px; font-size: 13px;">
+                <strong>Executing Streaming Matrix:</strong> {total_runs} trial(s) ({run_duration}s per trial). 
                 Live video window: <strong>{'ENABLED' if launch_ffplay else 'HEADLESS'}</strong>.
             </div>
             """,
@@ -918,7 +953,7 @@ with tab_runner:
             for t in range(1, run_trials + 1):
                 # TCP Trial
                 if "tcp" in protocols_to_run:
-                    render_stream_card(tcp_slot, "tcp", "⏳ STREAMING...")
+                    render_stream_card(tcp_slot, "tcp", "STREAMING...")
                     if "udp" in protocols_to_run and last_udp_row is None:
                         render_stream_card(udp_slot, "udp", "WAITING FOR TCP")
                     try:
@@ -928,12 +963,11 @@ with tab_runner:
                         render_stream_card(tcp_slot, "tcp", status_str, row=tcp_res)
                     except Exception as e:
                         render_stream_card(tcp_slot, "tcp", "ERROR", error=str(e))
-                    # Allow Windows TCP socket stack TIME_WAIT to drain cleanly
                     time.sleep(1.0)
 
                 # UDP Trial
                 if "udp" in protocols_to_run:
-                    render_stream_card(udp_slot, "udp", "⏳ STREAMING...")
+                    render_stream_card(udp_slot, "udp", "STREAMING...")
                     try:
                         udp_res = execute_trial_safe("udp", run_duration, c, t, run_id, launch_ffplay, active_video_path)
                         last_udp_row = udp_res
@@ -957,8 +991,8 @@ with tab_runner:
 
         arena_status.markdown(
             """
-            <div style="font-family: 'JetBrains Mono', monospace; font-size: 13px; color: #10B981; background: #121B2B; border: 1px solid rgba(16, 185, 129, 0.3); padding: 10px 14px; border-radius: 6px; margin-bottom: 14px;">
-                ✅ All trials executed successfully and logged to <code>results/experiments.csv</code>.
+            <div class="nf-card" style="font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--nf-success); border-color: rgba(63, 185, 80, 0.3); padding: 10px 14px; margin-bottom: 14px;">
+                All trials executed successfully and logged to results/experiments.csv.
             </div>
             """,
             unsafe_allow_html=True,
@@ -997,60 +1031,59 @@ with tab_runner:
                 tcp_stalls = tcp_r.get("stalls", 0) or 0
 
                 st.markdown(f"""
-                <div class="comparison-banner">
-                    <div class="comparison-title">
-                        <span>⚔️ Head-to-Head Comparative Analysis: TCP vs. UDP under Condition '{c_name}'</span>
-                        <span style="font-size: 11px; font-weight: normal; color: #94A3B8; margin-left: auto;">Asset: <strong>{v_name}</strong> | Logged at {sbs.get('timestamp')}</span>
+                <div class="nf-comparison-banner">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                        <span class="nf-subheading">Head-to-Head Comparative Analysis: TCP vs. UDP under Condition '{c_name}'</span>
+                        <span class="nf-caption">Asset: <span class="nf-mono">{v_name}</span> | {sbs.get('timestamp')}</span>
                     </div>
                     <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 12px;">
-                        <div style="background: #0E1624; padding: 10px 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.05);">
-                            <div style="font-size: 10px; color: #94A3B8; text-transform: uppercase;">Throughput Delta</div>
-                            <div style="font-size: 15px; font-weight: 700; font-family: 'JetBrains Mono'; color: #F8FAFC;">
+                        <div class="nf-card" style="padding: 10px 12px;">
+                            <div class="nf-label">Throughput Delta</div>
+                            <div class="nf-value nf-mono" style="font-weight: 700; margin-top: 4px;">
                                 TCP: {tcp_tp:.2f} | UDP: {udp_tp:.2f}
                             </div>
-                            <div style="font-size: 10px; color: #64748B;">Δ {abs(tcp_tp - udp_tp):.2f} Mbps</div>
+                            <div class="nf-caption" style="margin-top: 2px;">Δ {abs(tcp_tp - udp_tp):.2f} Mbps</div>
                         </div>
-                        <div style="background: #0E1624; padding: 10px 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.05);">
-                            <div style="font-size: 10px; color: #94A3B8; text-transform: uppercase;">Latency Delta</div>
-                            <div style="font-size: 15px; font-weight: 700; font-family: 'JetBrains Mono'; color: #F8FAFC;">
+                        <div class="nf-card" style="padding: 10px 12px;">
+                            <div class="nf-label">Latency Delta</div>
+                            <div class="nf-value nf-mono" style="font-weight: 700; margin-top: 4px;">
                                 TCP: {tcp_lat:.1f} ms | UDP: {udp_lat:.1f} ms
                             </div>
-                            <div style="font-size: 10px; color: #64748B;">Δ {abs(tcp_lat - udp_lat):.1f} ms</div>
+                            <div class="nf-caption" style="margin-top: 2px;">Δ {abs(tcp_lat - udp_lat):.1f} ms</div>
                         </div>
-                        <div style="background: #0E1624; padding: 10px 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.05);">
-                            <div style="font-size: 10px; color: #94A3B8; text-transform: uppercase;">Jitter Delta (RFC 3550)</div>
-                            <div style="font-size: 15px; font-weight: 700; font-family: 'JetBrains Mono'; color: #F8FAFC;">
+                        <div class="nf-card" style="padding: 10px 12px;">
+                            <div class="nf-label">Jitter Delta (RFC 3550)</div>
+                            <div class="nf-value nf-mono" style="font-weight: 700; margin-top: 4px;">
                                 TCP: {tcp_jit:.2f} ms | UDP: {udp_jit:.2f} ms
                             </div>
-                            <div style="font-size: 10px; color: #64748B;">Arrival variance</div>
+                            <div class="nf-caption" style="margin-top: 2px;">Arrival variance</div>
                         </div>
-                        <div style="background: #0E1624; padding: 10px 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.05);">
-                            <div style="font-size: 10px; color: #94A3B8; text-transform: uppercase;">Loss vs. Stalls</div>
-                            <div style="font-size: 15px; font-weight: 700; font-family: 'JetBrains Mono'; color: #F8FAFC;">
+                        <div class="nf-card" style="padding: 10px 12px;">
+                            <div class="nf-label">Loss vs. Stalls</div>
+                            <div class="nf-value nf-mono" style="font-weight: 700; margin-top: 4px;">
                                 Stalls: {tcp_stalls} | Loss: {udp_loss:.1f}%
                             </div>
-                            <div style="font-size: 10px; color: #64748B;">Core Protocol Trade-Off</div>
+                            <div class="nf-caption" style="margin-top: 2px;">Core Protocol Trade-Off</div>
                         </div>
                     </div>
-                    <div style="font-size: 12px; color: #CBD5E1; line-height: 1.5;">
-                        📌 <strong>Empirical Takeaway:</strong> Under condition <code>{c_name}</code>, UDP sacrificed packet reliability ({udp_loss:.2f}% unrecovered drops) to maintain uninterrupted real-time frame playback with zero stalls. In contrast, TCP preserved 100% cryptographic SHA-256 data fidelity, but suffered {tcp_stalls} playback buffering stall(s) due to socket retransmissions and Head-of-Line blocking.
+                    <div class="nf-stream-diagnosis">
+                        <strong>Empirical Takeaway:</strong> Under condition <code>{c_name}</code>, UDP prioritized real-time delivery with zero stalls while accepting {udp_loss:.2f}% packet loss. Conversely, TCP guaranteed 100% data integrity but experienced {tcp_stalls} buffering stall(s) due to retransmissions and Head-of-Line blocking.
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
 
     elif not start_btn:
-        # Default placeholder arena view
         render_stream_card(col_tcp_arena, "tcp", "STANDBY")
         render_stream_card(col_udp_arena, "udp", "STANDBY")
 
 # ==============================================================================
-# TAB 2: TCP vs UDP Comparative Analysis
+# TAB 2: TCP vs UDP
 # ==============================================================================
 with tab_comparison:
-    st.markdown("### 📊 Direct Comparative Metrics: TCP vs. UDP")
+    st.markdown('<div class="nf-section-heading">Comparative Metrics</div>', unsafe_allow_html=True)
 
     if completed_df.empty:
-        st.warning("No completed experiment records found yet. Use the 'Live Experiment Runner' to generate benchmark data.")
+        st.warning("No completed experiment records found yet. Use the 'Live Runner' to generate benchmark data.")
     else:
         metric_choices = {
             "throughput_mbps": ("Throughput (Mbps)", "Mbps", "Higher is better. Measures effective received video payload bandwidth."),
@@ -1079,9 +1112,9 @@ with tab_comparison:
         metric_title, metric_unit, metric_desc = metric_choices[selected_metric_key]
         with f_col2:
             st.markdown(f"""
-            <div style="background: #121B2B; border: 1px solid rgba(255,255,255,0.06); border-radius: 6px; padding: 12px 16px; margin-top: 4px;">
-                <div style="font-size: 13px; font-weight: 600; color: #F1F5F9;">{metric_title} [{metric_unit}]</div>
-                <div style="font-size: 12px; color: #94A3B8; margin-top: 2px;">{metric_desc}</div>
+            <div class="nf-card" style="padding: 12px 16px; margin-top: 4px;">
+                <div style="font-size: 13px; font-weight: 600; color: var(--nf-text-primary);">{metric_title} [{metric_unit}]</div>
+                <div class="nf-caption" style="margin-top: 2px;">{metric_desc}</div>
             </div>
             """, unsafe_allow_html=True)
 
@@ -1108,7 +1141,7 @@ with tab_comparison:
             # Secondary Analytics: Box Distribution & Scatter Trade-off
             col_chart1, col_chart2 = st.columns(2)
             with col_chart1:
-                st.markdown("#### Measurement Variance & Distribution")
+                st.markdown('<div class="nf-subheading" style="margin-bottom: 8px;">Measurement Variance & Distribution</div>', unsafe_allow_html=True)
                 fig_box = px.box(
                     filtered,
                     x="condition",
@@ -1122,7 +1155,7 @@ with tab_comparison:
                 st.plotly_chart(fig_box, use_container_width=True)
 
             with col_chart2:
-                st.markdown("#### Throughput vs. Latency Trade-Off")
+                st.markdown('<div class="nf-subheading" style="margin-bottom: 8px;">Throughput vs. Latency Trade-Off</div>', unsafe_allow_html=True)
                 fig_scatter = px.scatter(
                     filtered,
                     x="lat_avg_ms",
@@ -1138,10 +1171,10 @@ with tab_comparison:
                 st.plotly_chart(fig_scatter, use_container_width=True)
 
 # ==============================================================================
-# TAB 3: Impairment Scenarios & Mechanics
+# TAB 3: Impairments
 # ==============================================================================
 with tab_conditions:
-    st.markdown("### 🧪 Network Impairment Scenarios & Mathematical Models")
+    st.markdown('<div class="nf-section-heading">Network Impairment Scenarios</div>', unsafe_allow_html=True)
     st.markdown(
         "To rigorously evaluate protocol performance without physical cable unplugs or kernel netem driver requirements, "
         "an application-level loopback impairment proxy pipeline intercepts socket data on `127.0.0.1` and executes "
@@ -1161,16 +1194,15 @@ with tab_conditions:
         })
     st.dataframe(pd.DataFrame(cond_rows), use_container_width=True, hide_index=True)
 
-    st.markdown("---")
-    st.markdown("#### 🔬 Protocol Mechanics Under Network Impairments")
+    st.markdown('<div class="nf-subheading" style="margin-top: 24px; margin-bottom: 12px;">Protocol Mechanics Under Network Impairments</div>', unsafe_allow_html=True)
     col_t1, col_t2 = st.columns(2)
     with col_t1:
         st.markdown("""
-        <div style="background: #121B2B; border: 1px solid rgba(53, 200, 244, 0.25); border-radius: 8px; padding: 16px;">
-            <div style="font-size: 14px; font-weight: 700; color: #35C8F4; margin-bottom: 8px;">
+        <div class="nf-card">
+            <div style="font-size: 14px; font-weight: 700; color: var(--nf-text-primary); margin-bottom: 8px;">
                 TCP: Reliable Stream Transport
             </div>
-            <ul style="font-size: 12px; color: #CBD5E1; line-height: 1.6; margin-left: -15px;">
+            <ul style="font-size: 12px; color: var(--nf-text-secondary); line-height: 1.6; margin-left: -15px;">
                 <li><strong>Guaranteed Delivery:</strong> Uses sequence numbers, positive acknowledgments (ACKs), and automatic retransmissions (RTO).</li>
                 <li><strong>Head-of-Line (HoL) Blocking:</strong> When a segment is lost or delayed, subsequent arriving segments must wait in socket receive buffers until the missing segment is retransmitted.</li>
                 <li><strong>Real-World Video Effect:</strong> The video decoder starves for frames, producing <em>playback freezing / buffering stalls</em> and surging latency, but preserving 100% pixel fidelity with zero corrupt macroblocks.</li>
@@ -1179,11 +1211,11 @@ with tab_conditions:
         """, unsafe_allow_html=True)
     with col_t2:
         st.markdown("""
-        <div style="background: #121B2B; border: 1px solid rgba(255, 157, 69, 0.25); border-radius: 8px; padding: 16px;">
-            <div style="font-size: 14px; font-weight: 700; color: #FF9D45; margin-bottom: 8px;">
+        <div class="nf-card">
+            <div style="font-size: 14px; font-weight: 700; color: var(--nf-text-primary); margin-bottom: 8px;">
                 UDP: Timely Datagram Transport
             </div>
-            <ul style="font-size: 12px; color: #CBD5E1; line-height: 1.6; margin-left: -15px;">
+            <ul style="font-size: 12px; color: var(--nf-text-secondary); line-height: 1.6; margin-left: -15px;">
                 <li><strong>Fire-and-Forget:</strong> Transmits independent datagram chunks without connection handshakes or retransmission delays.</li>
                 <li><strong>Zero Head-of-Line Blocking:</strong> Arriving packets are fed immediately into the video decoder; lost packets are skipped.</li>
                 <li><strong>Real-World Video Effect:</strong> Playback maintains <em>ultra-low transit latency and smooth continuous timing</em>, but lost MPEG-TS packets result in visual artifacts, pixelation, or transient decoder glitching.</li>
@@ -1192,10 +1224,10 @@ with tab_conditions:
         """, unsafe_allow_html=True)
 
 # ==============================================================================
-# TAB 4: Statistical Summaries (Mean ± Std Dev)
+# TAB 4: Statistics
 # ==============================================================================
 with tab_summary:
-    st.markdown("### 📈 Repeated-Trial Aggregations (Mean ± Std Dev)")
+    st.markdown('<div class="nf-section-heading">Repeated-Trial Aggregations</div>', unsafe_allow_html=True)
     st.markdown(
         "Empirical scientific summaries aggregated by network condition and protocol across repeated experiment replications."
     )
@@ -1241,10 +1273,10 @@ with tab_summary:
         )
 
 # ==============================================================================
-# TAB 5: Full Audit Trail & CSV Export
+# TAB 5: Audit & CSV
 # ==============================================================================
 with tab_data:
-    st.markdown("### 📑 Full Experiment Audit Trail & CSV Export")
+    st.markdown('<div class="nf-section-heading">Audit Trail & CSV Export</div>', unsafe_allow_html=True)
     st.markdown(
         "Immutable audit log of all recorded benchmark trials with cryptographic SHA-256 verification, "
         "hardware timestamps, socket counters, and proxy metadata."
@@ -1262,7 +1294,7 @@ with tab_data:
             csv_buffer = io.StringIO()
             df.to_csv(csv_buffer, index=False)
             st.download_button(
-                label="📥 Export Full CSV Dataset",
+                label="Export Full CSV Dataset",
                 data=csv_buffer.getvalue().encode("utf-8"),
                 file_name=f"netflow_benchmark_audit_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                 mime="text/csv",
@@ -1307,9 +1339,9 @@ with tab_data:
             if "loss_pct" in table_df.columns:
                 table_df["loss_pct"] = table_df["loss_pct"].apply(lambda v: f"{v:.2f}%" if pd.notna(v) and v != "" else "-")
             if "sha256_match" in table_df.columns:
-                table_df["sha256_match"] = table_df["sha256_match"].apply(lambda v: "✅ Match" if str(v) == "True" else ("❌ Mismatch" if str(v) == "False" else "-"))
+                table_df["sha256_match"] = table_df["sha256_match"].apply(lambda v: "Match" if str(v) == "True" else ("Mismatch" if str(v) == "False" else "-"))
             if "completed" in table_df.columns:
-                table_df["completed"] = table_df["completed"].apply(lambda v: "✅ OK" if str(v) == "True" else "❌ Failed")
+                table_df["completed"] = table_df["completed"].apply(lambda v: "OK" if str(v) == "True" else "Failed")
 
             table_df = table_df.rename(columns=summary_cols_map)
             st.dataframe(table_df, use_container_width=True, hide_index=True)
